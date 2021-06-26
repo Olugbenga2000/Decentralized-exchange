@@ -1,13 +1,44 @@
 import React, {useState,useEffect} from "react";
 import Header from "./Header";
+import Wallet from "./Wallet";
 
 function App({web3,contracts,accounts}) {
   const [user,setUser] = useState({
     accounts : [],
+    balances : {tokenWallet : 0,
+                tokenDex : 0
+              },
     selectedToken : undefined
   })
+  const getBalances = async (account, token) => {
+    const tokenDex = await contracts.dex.methods.tradersbalances(
+      account,web3.utils.fromAscii(token.ticker)).call()
+    const tokenWallet = await contracts[token.ticker].methods.balanceOf(account).call()
+    return {tokenWallet, tokenDex}
+  }
+
   const [tokens, setTokens] = useState([])
-  const selectToken = token => setUser({...user,selectedToken : token})
+  const selectToken = async token => {
+    const balances = await getBalances(accounts[0],token)
+    setUser({accounts,balances,selectedToken : token})
+  }
+  
+  const deposit = async amount => {
+    await contracts[user.selectedToken.ticker].methods.approve(
+      contracts.dex.options.address,amount
+    ).send({from : user.accounts[0]})
+    await contracts.dex.methods.deposit
+    (amount, web3.utils.fromAscii(user.selectedToken.ticker)).send({from : user.accounts[0]})
+    const balances = await getBalances(user.accounts[0],user.selectedToken)
+    setUser(user => ({...user,balances}))
+  }
+
+  const withdraw = async amount => {
+    await contracts.dex.methods.withdraw
+    (amount, web3.utils.fromAscii(user.selectedToken.ticker)).send({from : user.accounts[0]})
+    const balances = await getBalances(user.accounts[0],user.selectedToken)
+    setUser(user => ({...user,balances}))
+  }
   useEffect(() =>{
     const init = async() =>{
       const rawTokens = await contracts.dex.methods.getTokens().call()
@@ -15,9 +46,11 @@ function App({web3,contracts,accounts}) {
         ...token,
         ticker : web3.utils.hexToUtf8(token.ticker)
       }))
+      const balances = await getBalances(accounts[0],tokens[0])
       setTokens(tokens)
       setUser({
         accounts,
+        balances,
         selectedToken : tokens[0]
       })
     }
@@ -38,6 +71,15 @@ function App({web3,contracts,accounts}) {
       tokens = {tokens}
       contracts = {contracts}
       selectToken = {selectToken}/>
+      <main className = 'container-fluid'>
+        <div className = 'row'>
+          <div className = 'col-sm-4 first-col'>
+      <Wallet deposit = {deposit}
+              withdraw = {withdraw}
+              user = {user} />
+              </div>
+              </div>
+      </main>
     </div>
   );
 }
