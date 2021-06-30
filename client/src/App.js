@@ -1,6 +1,15 @@
 import React, {useState,useEffect} from "react";
 import Header from "./Header";
 import Wallet from "./Wallet";
+import NewOrder from "./NewOrder";
+import AllOrders from "./AllOrders";
+import MyOrders from "./MyOrders";
+import AllTrades from "./AllTrades";
+
+const SIDE = {
+  BUY : 0,
+  SELL : 1
+}
 
 function App({web3,contracts,accounts}) {
   const [user,setUser] = useState({
@@ -10,6 +19,14 @@ function App({web3,contracts,accounts}) {
               },
     selectedToken : undefined
   })
+  const [tokens, setTokens] = useState([])
+  const [orders, setOrders] = useState({
+    buy : [],
+    sell : []
+  })
+  const [trades, setTrades] = useState([])
+  const [listener, setListener] = useState(undefined)
+
   const getBalances = async (account, token) => {
     const tokenDex = await contracts.dex.methods.tradersbalances(
       account,web3.utils.fromAscii(token.ticker)).call()
@@ -17,10 +34,37 @@ function App({web3,contracts,accounts}) {
     return {tokenWallet, tokenDex}
   }
 
-  const [tokens, setTokens] = useState([])
+  const getOrders = async token =>{
+    const order = await Promise.all([
+      contracts.dex.methods.getOrders(web3.utils.fromAscii(token.ticker),SIDE.BUY).call(),
+      contracts.dex.methods.getOrders(web3.utils.fromAscii(token.ticker),SIDE.SELL).call()])
+      return ({buy : order[0],
+               sell : order[1]})
+  }
+
+  const listenToTrades = token =>{
+    const tradeIds = new Set()
+     setTrades([])
+     const listener = contracts.dex.events.newTrade({
+      filter : {ticker : web3.utils.fromAscii(token.ticker)},
+      fromBlock : 0
+    }).on('data', newTrade => {
+      if (tradeIds.has(newTrade.returnValues.tradeId)){
+        return
+      }
+      tradeIds.add(newTrade.returnValues.tradeId)
+      setTrades(trades => ([...trades,newTrade.returnValues]))
+    })
+    setListener(listener)
+  }
+
   const selectToken = async token => {
-    const balances = await getBalances(accounts[0],token)
+    const [balances, orders] = await Promise.all([
+      getBalances(accounts[0],token),getOrders(token)])
     setUser({accounts,balances,selectedToken : token})
+    setOrders(orders)
+    listenToTrades(token)
+    listener.unsubscribe()
   }
   
   const deposit = async amount => {
@@ -39,6 +83,24 @@ function App({web3,contracts,accounts}) {
     const balances = await getBalances(user.accounts[0],user.selectedToken)
     setUser(user => ({...user,balances}))
   }
+
+  const createMarketOrder = async (amount,side) => {
+    await contracts.dex.methods.createMarketOrder(
+      web3.utils.fromAscii(user.selectedToken.ticker),amount,side
+      ).send({from: user.accounts[0]})
+    const orders = await getOrders(user.selectedToken)
+    setOrders(orders)
+    listenToTrades(user.selectedToken)
+  }
+
+  const createLimitOrder = async (amount,price,side) => {
+    await contracts.dex.methods.createLimitOrder(
+      web3.utils.fromAscii(user.selectedToken.ticker),amount,price,side
+    ).send({from: user.accounts[0]})
+    const orders = await getOrders(user.selectedToken)
+    setOrders(orders)
+  }
+  
   useEffect(() =>{
     const init = async() =>{
       const rawTokens = await contracts.dex.methods.getTokens().call()
@@ -46,7 +108,10 @@ function App({web3,contracts,accounts}) {
         ...token,
         ticker : web3.utils.hexToUtf8(token.ticker)
       }))
-      const balances = await getBalances(accounts[0],tokens[0])
+      const [balances,orders] = await Promise.all([getBalances(accounts[0],tokens[0]),
+                                  getOrders(tokens[0])])
+      setOrders(orders)
+      listenToTrades(tokens[0])
       setTokens(tokens)
       setUser({
         accounts,
@@ -77,7 +142,25 @@ function App({web3,contracts,accounts}) {
       <Wallet deposit = {deposit}
               withdraw = {withdraw}
               user = {user} />
+      {user.selectedToken.ticker !== 'DAI'? (
+      <NewOrder 
+        createMarketOrder = {createMarketOrder}
+        createLimitOrder = {createLimitOrder}/>)
+        :null}
               </div>
+      {user.selectedToken.ticker !== 'DAI'?
+        <div className = "col-sm-8">
+          <AllTrades trades = {trades}/>
+          <AllOrders orders = {orders}/>
+          <MyOrders orders = {{
+              buy : orders.buy.filter(
+                order => order.trader.toLowerCase() === user.accounts[0].toLowerCase()
+              ),
+              sell : orders.sell.filter(
+                order => order.trader.toLowerCase() === user.accounts[0].toLowerCase()
+              )
+          }}/>
+        </div> :null}
               </div>
       </main>
     </div>
