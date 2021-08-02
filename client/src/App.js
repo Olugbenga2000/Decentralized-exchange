@@ -89,7 +89,9 @@ function App({web3,contracts,accounts}) {
       web3.utils.fromAscii(user.selectedToken.ticker),amount,side
       ).send({from: user.accounts[0]})
     const orders = await getOrders(user.selectedToken)
+     const balances = await getBalances(user.accounts[0],user.selectedToken)
     setOrders(orders)
+     setUser(user => ({...user,balances}))
     listenToTrades(user.selectedToken)
   }
 
@@ -99,6 +101,7 @@ function App({web3,contracts,accounts}) {
     ).send({from: user.accounts[0]})
     const orders = await getOrders(user.selectedToken)
     setOrders(orders)
+   
   }
   
   useEffect(() =>{
